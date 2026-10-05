@@ -76,7 +76,7 @@ fn run<T: SizedSample + FromSample<f32>>(
             let frames = out.len() / ch.max(1);
             stereo.resize(frames * 2, 0.0);
             feed.pull(&mut stereo);
-            for (f, s) in out.chunks_mut(ch.max(1)).zip(stereo.chunks_exact(2)) {
+            for (f, s) in out.chunks_mut(ch.max(1)).zip(stereo.as_chunks::<2>().0) {
                 for (c, o) in f.iter_mut().enumerate() {
                     // Mono devices, or left and right mapped to the same channel, get the mix.
                     let v = if ch == 1 || (c == left && c == right) {

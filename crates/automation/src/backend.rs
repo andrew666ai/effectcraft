@@ -28,8 +28,9 @@ impl Backend {
     }
 
     /// Bridge to the app's control channel at `addr` (`9877` or `127.0.0.1:9877`).
-    pub fn bridge(addr: &str) -> Result<Self> {
-        Ok(Backend::Bridge(BridgeClient::new(addr)?))
+    /// `token` is the 64-character hex bearer token. It is not logged.
+    pub fn bridge(addr: &str, token: &str) -> Result<Self> {
+        Ok(Backend::Bridge(BridgeClient::new(addr, token)?))
     }
 
     pub fn is_bridge(&self) -> bool {
@@ -109,5 +110,4 @@ fn no_comp(comp: Option<&Value>) -> Error {
     }
 }
 
-pub const NEED_BRIDGE: &str =
-    "this tool drives the live app: start it with `effectcraft --control 9877` and run the MCP server as `effectcraft-cli mcp --bridge 9877`";
+pub const NEED_BRIDGE: &str = "this tool drives the live app: start it with `effectcraft --control 9877` and run the MCP server as `effectcraft-cli mcp --bridge 9877` with the control bearer token (SECURITY.md)";

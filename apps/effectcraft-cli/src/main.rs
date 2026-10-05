@@ -21,13 +21,14 @@
 //! effectcraft-cli bench --ops [--small] [--layers N] [--comps N] [--footage N]   everyday-operation timings
 //!     on a large generated project (open, save, auto-save, undo/redo, timeline, Project panel)
 //! effectcraft-cli script FILE.jsx [F.ecproj] | --eval CODE    run an After Effects-style script
-//! effectcraft-cli mcp [--bridge PORT]                         MCP server on stdio
+//! effectcraft-cli mcp [--bridge PORT] [--control-token TOKEN | --control-token-file PATH]   MCP server on stdio
 //!
 //! Project:  --project F.ecproj (or a positional *.ecproj) | --demo | --empty   (default: demo; mcp: empty)
 //! Saving:   --save (back to --project) | --save-as F.ecproj
 //! GPU:      --gpu renders on the GPU compositor (Mercury GPU Acceleration) when an adapter exists;
 //!           the default is the CPU (Mercury Software Only)
-//! Bridge:   --bridge PORT drives a running `effectcraft --control PORT` instead of a headless session
+//! Bridge:   --bridge PORT drives a running `effectcraft --control PORT` instead of a headless session.
+//!           The bridge sends the control bearer token and refuses a non-loopback address.
 //! Output:   --json for one compact JSON document on stdout (errors: {"error": …}, exit 1)
 //! ```
 //!
@@ -65,8 +66,11 @@ const USAGE: &str = "usage: effectcraft-cli <info|commands|exec|run|props|get|se
   script FILE.jsx [F.ecproj] | --eval CODE run JavaScript with the After Effects-style object model
                                            (app.project, comps, layers, properties…); prints writeLn
                                            output and the result; errors exit 1 with file:line:col
-  mcp [--bridge PORT]                      MCP server (JSON-RPC over stdio)
-options: --project F.ecproj | --demo | --empty   --save | --save-as F   --bridge PORT   --json   --gpu
+  mcp [--bridge PORT] [--control-token TOKEN | --control-token-file PATH]
+                                           MCP server (JSON-RPC over stdio). --bridge sends the
+                                           control bearer token; headless MCP does not use one
+options: --project F.ecproj | --demo | --empty   --save | --save-as F   --bridge PORT
+         --control-token TOKEN | --control-token-file PATH   --json   --gpu
 <comp>: id or name, '-' = active comp; <layer>: id, '#n' or name; <value>: JSON or bare string";
 
 /// Options that take a value.
@@ -79,6 +83,8 @@ const VALUED: &[&str] = &[
     "--params",
     "--project",
     "--bridge",
+    "--control-token",
+    "--control-token-file",
     "--save-as",
     "--filter",
     "--time",
@@ -228,11 +234,18 @@ fn usage_err<T>(m: &str) -> Result<T, Failure> {
 
 /// Build the backend: a bridge to the app, or a headless session with the requested project.
 fn backend(args: &Args, default_demo: bool) -> Result<Backend, Failure> {
+    let token_flag = args.opt("--control-token").is_some() || args.opt("--control-token-file").is_some();
     if let Some(addr) = args.opt("--bridge") {
         if args.project.is_some() || args.flag("--demo") {
             return usage_err("--bridge drives the running app's project; use `exec file.open` to open another");
         }
-        return Ok(Backend::bridge(addr)?);
+        let supplied = args.opt("--control-token").map(str::to_string);
+        let file = args.opt("--control-token-file").map(std::path::PathBuf::from);
+        let token = effectcraft_automation::control_auth::resolve_client_token(supplied, file)?;
+        return Ok(Backend::bridge(addr, &token)?);
+    }
+    if token_flag {
+        return usage_err("the control token is only used with --bridge");
     }
     let mut b = Backend::headless(session(args)?);
     if let Some(p) = &args.project {

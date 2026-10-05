@@ -478,7 +478,8 @@ MCP `run_script` tool.
 Every action is a command: an id, a label, a menu path, a shortcut, a parameter description,
 `enabled()` and `run()`. The menu bar is a tree of command ids. The desktop UI, the command line,
 the JSON control channel and the MCP server all dispatch by id, so anything a person can do from a
-menu, an agent can do too. Every interactive widget registers an automation id, so agents can also
+menu, an agent can do too. Stdio MCP does not listen. The loopback control port and the MCP bridge
+require a bearer token before a method runs (`SECURITY.md`). Every interactive widget registers an automation id, so agents can also
 inspect and click the interface. See [agents.md](agents.md) and
 [control-protocol.md](control-protocol.md).
 

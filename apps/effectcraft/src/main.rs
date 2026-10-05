@@ -1,9 +1,10 @@
 //! EffectCraft desktop app.
 //!
-//! Usage: `effectcraft [--control <port>] [--demo|--empty|--home] [project.ecproj | media files…]`
+//! Usage: `effectcraft [--control <port>] [--control-token <64-hex> | --control-token-file <path>] [--demo|--empty|--home] [project.ecproj | media files…]`
 //!
-//! `--control <port>` (or `EFFECTCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server;
-//! see `effectcraft_ui_egui::control` for the methods.
+//! `--control <port>` (or `EFFECTCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server.
+//! The first line must authenticate. The token is printed once only when it was just generated.
+//! See `effectcraft_ui_egui::control` for the methods and `SECURITY.md` for the lock.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -30,6 +31,8 @@ fn main() -> eframe::Result {
     effectcraft_engine::logging::install();
     effectcraft_engine::logging::install_panic_hook();
     let mut control_port: Option<u16> = std::env::var("EFFECTCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
+    let mut control_token = None;
+    let mut control_token_file = None;
     let mut files = Vec::new();
     let mut demo = true;
     let mut home: Option<bool> = None;
@@ -37,6 +40,20 @@ fn main() -> eframe::Result {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
+            "--control-token" => match args.next() {
+                Some(token) => control_token = Some(token),
+                None => {
+                    eprintln!("effectcraft: --control-token needs a 64-character hex token");
+                    return Ok(());
+                }
+            },
+            "--control-token-file" => match args.next() {
+                Some(path) => control_token_file = Some(std::path::PathBuf::from(path)),
+                None => {
+                    eprintln!("effectcraft: --control-token-file needs a path");
+                    return Ok(());
+                }
+            },
             "--demo" => demo = true,
             "--empty" => demo = false,
             "--home" => home = Some(true),
@@ -47,6 +64,24 @@ fn main() -> eframe::Result {
             _ => files.push(a),
         }
     }
+    let control = match control_port {
+        Some(port) => match effectcraft_automation::control_auth::resolve_server_token(control_token, control_token_file) {
+            Ok(source) => {
+                use effectcraft_automation::control_auth::ServerToken;
+                match &source {
+                    ServerToken::File { path, .. } => eprintln!("effectcraft: control token file: {}", path.display()),
+                    ServerToken::Supplied(_) => eprintln!("effectcraft: using supplied control token"),
+                    ServerToken::Generated(token) => eprintln!("effectcraft: control token: {token}"),
+                }
+                Some((port, source.token().to_string()))
+            }
+            Err(e) => {
+                eprintln!("effectcraft: control server not started: {e}");
+                return Ok(());
+            }
+        },
+        None => None,
+    };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("EffectCraft")
@@ -122,9 +157,9 @@ fn main() -> eframe::Result {
                 app.hooks.app_action = Some(Box::new(native_menu::app_action));
                 app.hooks.clipboard_text = Some(Box::new(native_menu::clipboard_text));
             }
-            if let Some(port) = control_port {
+            if let Some((port, token)) = control {
                 disable_app_nap();
-                let rx = control_server::start(port, cc.egui_ctx.clone());
+                let rx = control_server::start(port, token, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }
             Ok(Box::new(Desktop {

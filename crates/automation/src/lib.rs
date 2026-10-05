@@ -7,6 +7,9 @@
 //! * [`Backend`]: where tools run. **Headless** owns an in-process [`Session`] (no window);
 //!   **bridge** forwards to a running desktop app over its JSON-lines control channel
 //!   (`effectcraft --control 9877`, `docs/control-protocol.md`), adding screenshots and UI input.
+//!   The bridge authenticates with the control bearer token before any method.
+//! * [`control_auth`]: the token, the loopback check, and the connection / request / reply budgets.
+//!   Stdio MCP does not use the token.
 //! * [`tools`]: the tool catalogue (names, descriptions, JSON schemas) and their implementations,
 //!   shared by the MCP server and `effectcraft-cli`'s one-shot subcommands.
 //!
@@ -18,6 +21,7 @@
 pub mod backend;
 pub mod base64;
 pub mod bridge;
+pub mod control_auth;
 pub mod server;
 pub mod tools;
 
@@ -60,8 +64,8 @@ pub fn encode_png(w: u32, h: u32, rgba: Vec<u8>, max_side: u32) -> Result<Vec<u8
     let mut out = Vec::new();
     let enc = PngEncoder::new_with_quality(&mut out, CompressionType::Fast, FilterType::Adaptive);
     let raw = img.into_raw();
-    let r = if raw.chunks_exact(4).all(|p| p[3] == 255) {
-        let rgb: Vec<u8> = raw.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let r = if raw.as_chunks::<4>().0.iter().all(|&[_, _, _, a]| a == 255) {
+        let rgb: Vec<u8> = raw.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, _]| [r, g, b]).collect();
         enc.write_image(&rgb, w, h, image::ExtendedColorType::Rgb8)
     } else {
         enc.write_image(&raw, w, h, image::ExtendedColorType::Rgba8)
