@@ -157,6 +157,26 @@ fn mcp_over_stdio() {
 }
 
 #[test]
+fn bridge_without_a_token_is_rejected() {
+    let out =
+        bin().args(["mcp", "--bridge", "127.0.0.1:9"]).env_remove("EFFECTCRAFT_CONTROL_TOKEN").env_remove("EFFECTCRAFT_CONTROL_TOKEN_FILE").output().unwrap();
+    assert_ne!(out.status.code(), Some(0));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("EFFECTCRAFT_CONTROL_TOKEN"), "{err}");
+}
+
+#[test]
+fn bridge_refuses_a_non_loopback_address() {
+    let token = "ab".repeat(32);
+    let out =
+        bin().args(["exec", "comp.new", "--bridge", "203.0.113.5:9", "--control-token", &token]).env_remove("EFFECTCRAFT_CONTROL_TOKEN_FILE").output().unwrap();
+    assert_ne!(out.status.code(), Some(0));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("loopback"), "{err}");
+    assert!(!err.contains(&token), "{err}");
+}
+
+#[test]
 fn script_file_and_eval() {
     let proj = tmp("scripted.ecproj");
     let p = proj.to_str().unwrap();

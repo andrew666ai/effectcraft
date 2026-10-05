@@ -7,18 +7,30 @@ effectcraft --control 9877        # or EFFECTCRAFT_CONTROL_PORT=9877
 ```
 
 - **Transport:** TCP on `127.0.0.1` only, one JSON object per line in each direction. Connections are
-  persistent; requests on one connection are answered in order.
+  persistent; requests on one connection are answered in order. Do not tunnel this port.
+- **Auth:** the first line must be `{"id": 1, "method": "auth", "params": {"token": "<64 hex characters>"}}`.
+  The reply is `{"id": 1, "ok": true, "result": {"authenticated": true}}`. A missing or wrong token
+  returns `authentication required` and the connection closes. No method runs until auth succeeds.
+  The token comes from `--control-token`, `--control-token-file`, `EFFECTCRAFT_CONTROL_TOKEN`,
+  `EFFECTCRAFT_CONTROL_TOKEN_FILE`, or, when none of those are set, one line on stderr the first time
+  the listener starts. See [SECURITY.md](../SECURITY.md). The token is not printed again and is not
+  echoed in replies.
 - **Request:** `{"id": 1, "method": "engine.execute", "params": {...}}` (`id` is echoed back, `params`
   defaults to `{}`).
 - **Reply:** `{"id": 1, "ok": true, "result": ...}` or `{"id": 1, "ok": false, "error": "message"}`.
+- **Budgets:** 16 connections, 1 MiB per request line, 8 MiB per reply. A reply that does not fit is
+  an error line; the command may already have finished.
 - Requests run on the UI thread between frames. Input methods (`ui.click`, `ui.key` and similar)
   reply after the synthetic input has been processed. Methods that need an element that isn't drawn
   yet are retried for a few frames. A request times out after 60 s.
 
-Quick test:
+Quick test (use the token from stderr or the token file, not one from this document):
 
 ```sh
-printf '{"id":1,"method":"engine.execute","params":{"command":"comp.new","params":{"name":"A"}}}\n' | nc 127.0.0.1 9877
+printf '%s\n' \
+  '{"id":1,"method":"auth","params":{"token":"'"$EFFECTCRAFT_CONTROL_TOKEN"'"}}' \
+  '{"id":2,"method":"engine.execute","params":{"command":"comp.new","params":{"name":"A"}}}' \
+  | nc 127.0.0.1 9877
 ```
 
 ## Engine
@@ -109,5 +121,6 @@ Viewer state that agents drive headless too: `view.snapping`, `view.channel {cha
 shape paths by uid), `keys.setSpatialTangents` (motion-path handles) and `keys.transform` (Graph
 Editor transform box, timeline Alt-drag scaling).
 
-The MCP server's bridge mode (`effectcraft-cli mcp --bridge 9877`) is a thin client of this protocol;
-see [agents.md](agents.md).
+The MCP server's bridge mode (`effectcraft-cli mcp --bridge 9877`, with the same bearer token) is a thin
+client of this protocol; see [agents.md](agents.md). Stdio MCP (`effectcraft-cli mcp`) does not open a
+port and does not use the token.

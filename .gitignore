@@ -1,6 +1,8 @@
 *~
 plan/
 /target
+# Bearer tokens for loopback control. Never commit one.
+control-token
 /dist
 /log
 .DS_Store

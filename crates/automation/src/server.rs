@@ -5,13 +5,14 @@ use std::io::{BufRead, Write};
 
 use serde_json::{Value, json};
 
+use crate::control_auth::{LineRead, MAX_BATCH_STEPS, MAX_REQUEST_BYTES, read_bounded_line};
 use crate::tools::{self, Reply};
 use crate::{Backend, Error, base64};
 
 /// Protocol revisions we speak, newest first. We answer with the client's if we know it.
 pub const PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "EffectCraft is an After Effects-class motion graphics compositor. Everything is an engine command: list_commands discovers ids and params, execute_command runs them (undoable). Typical flow: execute_command comp.new -> execute_command layer.newText / layer.newSolid (returns the layer id) -> set_property / add_keyframe -> execute_command effect.apply -> render_frame to look at the result. Inspect with get_project, get_comp and get_layer (every property node carries its `path`, e.g. `transform/position`, `effects/#1/blurriness`). Times are seconds. In bridge mode (app started with `--control <port>`) screenshot and the ui_* tools show and operate the live window.";
+const INSTRUCTIONS: &str = "EffectCraft is an After Effects-class motion graphics compositor. Everything is an engine command: list_commands discovers ids and params, execute_command runs them (undoable). Typical flow: execute_command comp.new -> execute_command layer.newText / layer.newSolid (returns the layer id) -> set_property / add_keyframe -> execute_command effect.apply -> render_frame to look at the result. Inspect with get_project, get_comp and get_layer (every property node carries its `path`, e.g. `transform/position`, `effects/#1/blurriness`). Times are seconds. In bridge mode (app started with `--control <port>`, MCP started with the control bearer token) screenshot and the ui_* tools show and operate the live window. Stdio MCP does not open a port.";
 
 // JSON-RPC error codes.
 const PARSE_ERROR: i64 = -32700;
@@ -37,6 +38,9 @@ impl McpServer {
         if let Value::Array(batch) = msg {
             if batch.is_empty() {
                 return Some(error(Value::Null, INVALID_REQUEST, "empty batch"));
+            }
+            if batch.len() > MAX_BATCH_STEPS {
+                return Some(error(Value::Null, INVALID_REQUEST, &format!("batch exceeds {MAX_BATCH_STEPS} steps")));
             }
             let out: Vec<Value> = batch.iter().filter_map(|m| self.handle(m)).collect();
             return (!out.is_empty()).then_some(Value::Array(out));
@@ -71,16 +75,28 @@ impl McpServer {
         Some(reply.to_string())
     }
 
-    /// Serve until EOF on `input`.
-    pub fn serve(&mut self, input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
-        for line in input.lines() {
-            if let Some(reply) = self.handle_line(&line?) {
-                output.write_all(reply.as_bytes())?;
-                output.write_all(b"\n")?;
-                output.flush()?;
+    /// Serve until EOF on `input`. Request lines longer than 1 MiB are rejected and the loop stops.
+    pub fn serve(&mut self, mut input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
+        let mut line = String::new();
+        loop {
+            match read_bounded_line(&mut input, &mut line, MAX_REQUEST_BYTES)? {
+                LineRead::Eof => return Ok(()),
+                LineRead::TooLong => {
+                    let reply = error(Value::Null, INVALID_REQUEST, &format!("request exceeds {MAX_REQUEST_BYTES} bytes"));
+                    output.write_all(reply.to_string().as_bytes())?;
+                    output.write_all(b"\n")?;
+                    output.flush()?;
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "request exceeds budget"));
+                }
+                LineRead::Line => {
+                    if let Some(reply) = self.handle_line(&line) {
+                        output.write_all(reply.as_bytes())?;
+                        output.write_all(b"\n")?;
+                        output.flush()?;
+                    }
+                }
             }
         }
-        Ok(())
     }
 
     /// Serve on stdin/stdout (the MCP stdio transport).

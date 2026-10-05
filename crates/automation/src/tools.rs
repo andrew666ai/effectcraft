@@ -401,6 +401,9 @@ fn batch_tool(b: &mut Backend, a: &Value) -> Result<Reply> {
         Value::String(_) => params_of(Some(steps))?,
         v => v.clone(),
     };
+    if steps.as_array().is_some_and(|s| s.len() > crate::control_auth::MAX_BATCH_STEPS) {
+        return Err(Error::BadArgs(format!("batch exceeds {} steps", crate::control_auth::MAX_BATCH_STEPS)));
+    }
     json_reply(b.exec("engine.batch", obj(&[("steps", Some(&steps)), ("label", get(a, "label")), ("atomic", get(a, "atomic"))]))?)
 }
 

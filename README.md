@@ -172,8 +172,9 @@ them:
   `effectcraft-cli set Main '#1' transform/position '[100,360]' --time 0 main.ecproj --save`
   or `effectcraft-cli render --comp Main --out main.mp4`, or
   `effectcraft-cli exec file.exportLottie '{"comp":"Main","path":"main.json"}' main.ecproj`.
-- **Control channel:** `effectcraft --control 9877` accepts JSON lines to run commands, inspect
-  and click any widget by its automation id, and take screenshots.
+- **Control channel:** `effectcraft --control 9877` accepts JSON lines on `127.0.0.1` to run
+  commands, inspect and click any widget by its automation id, and take screenshots. The first
+  line must present a bearer token (`SECURITY.md`). Stdio MCP does not open a port.
 
 See [docs/agents.md](docs/agents.md) and [docs/control-protocol.md](docs/control-protocol.md).
 

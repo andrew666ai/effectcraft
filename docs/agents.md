@@ -6,9 +6,9 @@ user can do, an agent can do too. There are three ways in:
 
 | Interface | Best for | Needs a window |
 |---|---|---|
-| **MCP** (`effectcraft-cli mcp`) | Claude Code and other MCP clients | no (headless), or yes with `--bridge` |
+| **MCP** (`effectcraft-cli mcp`) | Claude Code and other MCP clients | no (headless), or yes with `--bridge` and the control token |
 | **CLI** (`effectcraft-cli exec/get/set/...`) | one-shot scripting and CI; JSON output with `--json` | no |
-| **Control channel** (`effectcraft --control 9877`) | driving and seeing the live UI; see [control-protocol.md](control-protocol.md) | yes |
+| **Control channel** (`effectcraft --control 9877`) | driving and seeing the live UI; see [control-protocol.md](control-protocol.md). Loopback only; the first line is `auth` | yes |
 
 ## MCP setup
 
@@ -35,10 +35,13 @@ You can also register it from the command line:
 `claude mcp add effectcraft -- /path/to/target/release/effectcraft-cli mcp`. Other clients (Claude
 Desktop, Cursor and the like) take the same `command` and `args`.
 
-- **Headless** (`["mcp"]`): an in-process session with no window. Add `"--demo"` or
-  `"--project", "file.ecproj"` to start with content. Startup is instant.
+- **Headless** (`["mcp"]`): an in-process session with no window and no TCP port. Add `"--demo"` or
+  `"--project", "file.ecproj"` to start with content. Startup is instant. No control token.
 - **Bridge** (`["mcp", "--bridge", "9877"]`): drives a running `effectcraft --control 9877`, so you
-  see every change live. Bridge mode adds `screenshot` and the `ui_*` tools.
+  see every change live. The bridge sends the bearer token (`--control-token`, `--control-token-file`,
+  `EFFECTCRAFT_CONTROL_TOKEN`, or `EFFECTCRAFT_CONTROL_TOKEN_FILE`) and refuses any host that is not
+  loopback. Bridge mode adds `screenshot` and the `ui_*` tools. The committed `.mcp.json` bridge
+  entry expects that token in the environment; it does not embed one.
 
 The server speaks JSON-RPC 2.0 over stdio, one message per line, and supports MCP protocol versions
 2025-06-18, 2025-03-26 and 2024-11-05 (`initialize`, `ping`, `tools/list`, `tools/call`).
@@ -465,7 +468,8 @@ not read or written.
 
 ## Seeing the UI
 
-To work on the UI, start the app with `cargo run -p effectcraft -- --control 9877` and use MCP bridge
-mode or the raw control channel. A good loop is: `ui_elements` to find an id, `ui_click` or `ui_drag`
+To work on the UI, start the app with `cargo run -p effectcraft -- --control 9877`. It prints a
+control token once on stderr when you did not pass a token file or `EFFECTCRAFT_CONTROL_TOKEN`.
+Use that token with MCP bridge mode or the raw control channel. A good loop is: `ui_elements` to find an id, `ui_click` or `ui_drag`
 to act, then `screenshot {"panel":"Timeline"}` to check the result. `render_frame` shows the
 composition itself at any zoom.

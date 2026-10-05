@@ -196,8 +196,10 @@ fn stdio_loop() {
     assert_eq!(lines[1]["result"]["isError"], false);
 }
 
+const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
 /// A fake desktop control channel: answers `engine.execute` from a real session, and canned
-/// `render.frame` / `ui.screenshot` replies.
+/// `render.frame` / `ui.screenshot` replies. The first line must be `auth`.
 fn fake_app() -> u16 {
     let l = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = l.local_addr().unwrap().port();
@@ -205,8 +207,20 @@ fn fake_app() -> u16 {
         let (stream, _) = l.accept().unwrap();
         let mut out = stream.try_clone().unwrap();
         let mut session = Session::default();
+        let mut authed = false;
         for line in BufReader::new(stream).lines() {
             let msg: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            if !authed {
+                let ok = msg["method"] == "auth" && msg["params"]["token"] == TOKEN;
+                if ok {
+                    writeln!(out, "{}", json!({"id": msg["id"], "ok": true, "result": {"authenticated": true}})).unwrap();
+                    authed = true;
+                } else {
+                    writeln!(out, "{}", json!({"id": msg["id"], "ok": false, "error": "authentication required"})).unwrap();
+                    break;
+                }
+                continue;
+            }
             let p = &msg["params"];
             let reply = match msg["method"].as_str().unwrap() {
                 "engine.execute" => match session.execute(p["command"].as_str().unwrap(), p["params"].clone()) {
@@ -236,7 +250,7 @@ fn fake_app() -> u16 {
 #[test]
 fn bridge_forwards_to_control_channel() {
     let port = fake_app();
-    let mut s = McpServer::new(Backend::bridge(&port.to_string()).unwrap());
+    let mut s = McpServer::new(Backend::bridge(&port.to_string(), TOKEN).unwrap());
     let r = rpc(&mut s, 1, "initialize", json!({}));
     assert!(r["serverInfo"]["title"].as_str().unwrap().contains("bridge"));
     let names: Vec<String> =
@@ -261,8 +275,49 @@ fn bridge_forwards_to_control_channel() {
 
 #[test]
 fn bridge_rejects_non_loopback() {
-    assert!(Backend::bridge("10.0.0.1:9877").is_err());
-    assert!(Backend::bridge("localhost:9877").is_ok());
+    assert!(Backend::bridge("10.0.0.1:9877", TOKEN).is_err());
+    assert!(Backend::bridge("localhost:9877", TOKEN).is_ok());
+    assert!(Backend::bridge("127.0.0.1:9", "nope").is_err());
+}
+
+#[test]
+fn bridge_refuses_a_bad_token_before_any_method() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let seen = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut out = stream.try_clone().unwrap();
+        let mut methods = Vec::new();
+        let mut lines = BufReader::new(stream).lines();
+        if let Some(line) = lines.next() {
+            let msg: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            methods.push(msg["method"].as_str().unwrap().to_string());
+            writeln!(out, "{}", json!({"id": msg["id"], "ok": false, "error": "authentication required"})).unwrap();
+        }
+        methods
+    });
+    let err = crate::BridgeClient::new(&addr, TOKEN).unwrap().call("engine.execute", json!({})).unwrap_err();
+    assert!(err.to_string().contains("authentication required"), "{err}");
+    assert!(!err.to_string().contains(TOKEN));
+    assert_eq!(seen.join().unwrap(), ["auth"]);
+}
+
+#[test]
+fn batch_over_the_step_limit_is_rejected() {
+    let mut s = server();
+    let steps: Vec<Value> = (0..257).map(|_| json!({"command": "comp.new"})).collect();
+    let (c, err) = call(&mut s, "batch", json!({"steps": steps}));
+    assert!(err, "{c:?}");
+    assert!(c[0]["text"].as_str().unwrap().contains("256"), "{c:?}");
+}
+
+#[test]
+fn jsonrpc_batch_over_the_step_limit_is_rejected() {
+    let mut s = server();
+    let batch: Vec<Value> = (0..257).map(|_| json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).collect();
+    let reply = s.handle_line(&serde_json::to_string(&Value::Array(batch)).unwrap()).unwrap();
+    let v: Value = serde_json::from_str(&reply).unwrap();
+    assert!(v["error"]["message"].as_str().unwrap().contains("256"), "{v}");
 }
 
 #[test]

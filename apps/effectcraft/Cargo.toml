@@ -13,6 +13,7 @@ workspace = true
 effectcraft-engine = { workspace = true }
 effectcraft-host = { workspace = true }
 effectcraft-ui-egui = { workspace = true }
+effectcraft-automation = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
 serde_json = { workspace = true }
